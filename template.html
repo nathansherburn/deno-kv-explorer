@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deno KV Explorer</title>
+  </head>
+  <body>
+    <h1>Deno KV Explorer</h1>
+    ${results}
+    <script>
+      function deleteEntries(path) {
+        const confirm = prompt("Are you sure you want to delete this entry?");
+        if (confirm === "yes") {
+          fetch("/delete/" + path, {
+            method: "DELETE",
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (data.success) {
+                window.location.reload();
+              } else {
+                alert("Failed to delete entry");
+              }
+            });
+        }
+      }
+    </script>
+  </body>
+</html>
