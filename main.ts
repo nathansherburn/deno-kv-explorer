@@ -31,7 +31,7 @@ const handler = async (req: Request): Promise<Response> => {
   if (req.method === "GET" && pathname === "/list") {
     const { searchParams } = url;
     const prefix = searchParams.get("prefix");
-    const limit = searchParams.get("limit") || "1000";
+    const limit = searchParams.get("limit") || "100";
     const cursor = searchParams.get("cursor") || undefined;
     const reverse = searchParams.get("reverse");
     const query = prefix ? decodeKvKey(prefix) : [];
