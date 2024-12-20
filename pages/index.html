@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Deno KV Explorer</title>
+    <style>
+      form {
+        display: flex;
+        flex-direction: column;
+        margin-bottom: 16px;
+      }
+      input[type="search"] {
+        flex: 1;
+        padding: 8px;
+        font-size: 16px;
+      }
+      .entry {
+        color: #333;
+        display: grid;
+        grid-template-rows: 1fr;
+        grid-column-gap: 8px;
+        text-decoration: none;
+        padding: 8px;
+        border-bottom: 1px solid #f0f0f0;
+      }
+      .entry:hover {
+        background-color: #f9f9f9;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Deno KV Explorer</h1>
+    <form onsubmit="event.preventDefault(); find(); return false;">
+      <input
+        type="search"
+        id="search"
+        placeholder="['user', 123, 'profile']"
+        value="[]"
+      />
+      <div>
+        <input
+          type="number"
+          id="limit"
+          placeholder="Limit"
+          max="1000"
+          min="1"
+        />
+        <input type="checkbox" id="reverse" />
+        <label for="reverse">Reverse</label>
+      </div>
+      <button type="submit">Search</button>
+    </form>
+    <div id="results"></div>
+    <script>
+      const params = new URLSearchParams(window.location.search);
+      const prefix = decodeKvKey(params.get("prefix") || "[]");
+      const limit = params.get("limit") || 100;
+      const reverse = params.get("reverse") === "true";
+
+      const searchEl = document.getElementById("search");
+      const limitEl = document.getElementById("limit");
+      const reverseEl = document.getElementById("reverse");
+
+      searchEl.value = JSON.stringify(prefix);
+      limitEl.value = limit;
+      reverseEl.checked = reverse;
+
+      fetch(
+        "/list?prefix=" + encodeKvKey(prefix) + "&limit=" + limit + "&reverse=" +
+          reverse,
+      )
+        .then((res) => res.json())
+        .then((data) => {
+          const maxKeyLength = data.reduce(
+            (max, entry) => Math.max(max, entry.key.length),
+            0,
+          );
+          data.forEach((entry) => {
+            const entryEl = document.createElement("a");
+            entryEl.style.gridTemplateColumns = `repeat(${maxKeyLength}, 1fr)`;
+            entryEl.classList.add("entry");
+            entryEl.href = `/edit?key=${entry.key}`;
+            entry.key.forEach((keyPart) => {
+              const keyPartEl = document.createElement("span");
+              keyPartEl.classList.add("key-part");
+              keyPartEl.textContent = keyPart;
+              entryEl.appendChild(keyPartEl);
+            });
+            results.appendChild(entryEl);
+          });
+        });
+
+      function find() {
+        const search = JSON.parse(document.getElementById("search").value);
+        const prefix = encodeKvKey(search);
+        const limit = document.getElementById("limit").value;
+        const reverse = document.getElementById("reverse").checked;
+        window.location.href =
+          `/?prefix=${prefix}&limit=${limit}&reverse=${reverse}`;
+      }
+
+      function encodeKvKey(key) {
+        return encodeURIComponent(
+          JSON.stringify(
+            key.map((part) => {
+              if (part instanceof Uint8Array) {
+                return { type: "Uint8Array", value: Array.from(part) };
+              }
+              return { type: typeof part, value: part };
+            }),
+          ),
+        );
+      }
+
+      function decodeKvKey(encodedKey) {
+        const decoded = JSON.parse(decodeURIComponent(encodedKey));
+        return decoded.map((item) => {
+          switch (item.type) {
+            case "Uint8Array":
+              return new Uint8Array(item.value);
+            case "string":
+              return item.value;
+            case "number":
+              return item.value;
+            case "bigint":
+              return BigInt(item.value);
+            case "boolean":
+              return item.value;
+            default:
+              throw new Error(`Unsupported key part type: ${item.type}`);
+          }
+        });
+      }
+
+      function deleteEntries(path) {
+        const confirm = prompt("Are you sure you want to delete this entry?");
+        if (confirm === "yes") {
+          fetch("/delete/" + path, {
+            method: "DELETE",
+          })
+            .then((res) => res.json())
+            .then((data) => {
+              if (data.success) window.location.reload();
+              else alert("Failed to delete entry");
+            });
+        }
+      }
+    </script>
+  </body>
+</html>

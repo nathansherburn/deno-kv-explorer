@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { decodeKvKey } from "./key-encoding.ts";
 
 const DENO_KV_DB_ID = Deno.env.get("DENO_KV_DB_ID");
 const DENO_KV_ACCESS_TOKEN = Deno.env.get("DENO_KV_ACCESS_TOKEN");
@@ -11,87 +12,60 @@ if (!DENO_KV_ACCESS_TOKEN) {
 }
 
 const kv = await Deno.openKv(
-  `https://api.deno.com/databases/${DENO_KV_DB_ID}/connect`,
+  `https://api.deno.com/databases/${DENO_KV_DB_ID}/connect`
 );
 
 const app = new Hono();
 
+// Pages
 app.get("/", async (c) => {
-  const allEntries = await Array.fromAsync(kv.list({ prefix: [] }));
-  const topLevelKeys = new Set();
-  allEntries.forEach((entry) => {
-    const key = entry.key[0];
-    topLevelKeys.add(key);
-  });
-  topLevelKeys.forEach((key) => {
-    console.log(key);
-  });
-  let html = "<html>";
-  topLevelKeys.forEach((key) => {
-    html += `<a href="/${key}">${key}</a><br>`;
-  });
-  html += "</html>";
+  const html = await Deno.readTextFile("./pages/index.html");
   return c.html(html);
 });
 
-app.get("/:key0", async (c) => {
-  const key0 = c.req.param("key0");
-  const entries = await Array.fromAsync(kv.list({ prefix: [key0] }));
-  const topLevelKeys = new Set();
-  entries.forEach((entry) => {
-    const key = entry.key[1];
-    topLevelKeys.add(key);
-  })
-  let html = "<html>";
-  topLevelKeys.forEach((key) => {
-    html += `<a href="/${key0}/${key}">${key}</a><br>`;
-  });
-  html += "</html>";
+app.get("/edit", async (c) => {
+  const html = await Deno.readTextFile("./pages/edit.html");
   return c.html(html);
 });
 
-app.get("/:key0/:key1", async (c) => {
-  const template = Deno.readTextFileSync("template.html");
-  const key0 = c.req.param("key0");
-  const key1 = c.req.param("key1");
-  const entries = await Array.fromAsync(kv.list({ prefix: [key0, key1] }));
-  const topLevelKeys = new Set();
-  entries.forEach((entry) => {
-    const key = entry.key[2];
-    topLevelKeys.add(key);
-  })
-  let results = "";
-  topLevelKeys.forEach((key) => {
-    results += `<a href="/${key0}/${key1}/${key}">${key}</a> <button onclick="deleteEntries('${key0}/${key1}/${key}')">X</button><br>`;
-  });
-  const html = render(template, { results });
+// API
+app.get("/list", async (c) => {
+  const { prefix, limit, cursor, reverse } = c.req.query();
+  const query = prefix ? decodeKvKey(prefix as string) : [];
+  const kvEntryIterator = kv.list(
+    { prefix: query },
+    {
+      limit: +limit || 1000,
+      cursor: cursor,
+      reverse: reverse === "true",
+    }
+  );
 
-  return c.html(html);
+  const response = await Array.fromAsync(kvEntryIterator);
+
+  return c.json(response || []);
 });
 
-app.get("/:key0/:key1/:key2", async (c) => {
-  const key0 = c.req.param("key0");
-  const key1 = c.req.param("key1");
-  const key2 = c.req.param("key2");
-  const entries = await kv.get([key0, key1, key2]);
-  return c.json(entries);
+app.get("/get", async (c) => {
+  const { key } = c.req.query();
+  const kvKey = decodeKvKey(key as string);
+  const entry = await kv.get(kvKey);
+  return c.json(entry || {});
 });
 
-app.delete("delete/:key0/:key1/:key2", async (c) => {
-  const key0 = c.req.param("key0");
-  const key1 = c.req.param("key1");
-  const key2 = c.req.param("key2");
-
-  await kv.delete([key0, key1, key2]);
+app.delete("/delete", async (c) => {
+  const { key } = await c.req.query();
+  const kvKey = decodeKvKey(key as string);
+  await kv.delete(kvKey);
   return c.json({ success: true });
 });
 
-const render = (template: string, data: Record<string, string>) => {
-  let result = template;
-  for (const key in data) {
-    result = result.replace(`\${${key}}`, data[key]);
-  }
-  return result;
-};
+app.post("/set", async (c) => {
+  const { key } = await c.req.query();
+  const value = await c.req.json();
+  const kvKey = decodeKvKey(key as string);
+  await kv.set(kvKey, value);
+  return c.json({ success: true });
+});
 
 Deno.serve(app.fetch);

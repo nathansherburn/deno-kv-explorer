@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Deno KV Explorer</title>
+    <style>
+      #result {
+        width: 100%;
+        height: 400px;
+        box-sizing: border-box;
+        display: block;
+        white-space: pre-wrap;
+        overflow: auto;
+        border: 1px solid #ccc;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Deno KV Explorer</h1>
+    <div id="result"></div>
+    <button id="save-button" onclick="save()">Save</button>
+
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.37.0/ace.min.js"
+      integrity="sha512-ir9JaQR8EgducDjvBjP9spPK+QWvlQDRv3vWn8c1+PAd2+W1wswCI2XDGJSr8V7s3wS/8bKnvK86tNtLbTapdQ=="
+      crossorigin="anonymous"
+      referrerpolicy="no-referrer"
+    ></script>
+    <script>
+      const key = location.search.replace("?key=", "");
+      const kvKey = encodeKvKey(key.split(","));
+      const editor = ace.edit("result");
+
+      editor.session.setMode("ace/mode/json");
+      editor.setShowPrintMargin(false);
+
+      function encodeKvKey(key) {
+        return encodeURIComponent(
+          JSON.stringify(
+            key.map((part) => {
+              if (part instanceof Uint8Array) {
+                return { type: "Uint8Array", value: Array.from(part) };
+              }
+              return { type: typeof part, value: part };
+            }),
+          ),
+        );
+      }
+
+      fetch("/get?key=" + kvKey)
+        .then((res) => res.json())
+        .then((entry) => {
+          const value = JSON.parse(entry.value);
+          const formatted = JSON.stringify(value, null, 2);
+          editor.setValue(formatted);
+          editor.clearSelection();
+        });
+
+      function save() {
+        const saveButton = document.querySelector("#save-button");
+        saveButton.textContent = "Saving...";
+        const data = editor.getValue();
+        fetch("/set?key=" + kvKey, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify(data),
+        }).then(() => {
+          saveButton.textContent = "Save";
+        }).catch(() => {
+          alert("Failed to save data");
+          saveButton.textContent = "Save";
+        });
+      }
+    </script>
+  </body>
+</html>
