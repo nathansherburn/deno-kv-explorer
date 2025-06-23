@@ -4,33 +4,15 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Deno KV Explorer</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-      }
-      #result {
-        width: 100%;
-        height: 400px;
-        box-sizing: border-box;
-        display: block;
-        white-space: pre-wrap;
-        overflow: auto;
-        border: 1px solid #ccc;
-        margin-bottom: 16px;
-        font-size: 1rem;
-      }
-      button {
-        padding: 8px;
-        font-size: 16px;
-        cursor: pointer;
-        margin: 8px 0;
-      }
-    </style>
+    <link rel="stylesheet" href="/styles.css">
   </head>
-  <body>
+  <body class="container">
     <h1>Deno KV Explorer</h1>
-    <div id="result"></div>
-    <button id="save-button" onclick="save()">Save</button>
+    <div id="result" class="editor"></div>
+    <div class="button-group">
+      <button id="save-button" class="btn-primary">Save</button>
+      <button id="delete-button" class="btn-danger">Delete</button>
+    </div>
 
     <script
       src="https://cdnjs.cloudflare.com/ajax/libs/ace/1.37.0/ace.min.js"
@@ -38,52 +20,92 @@
       crossorigin="anonymous"
       referrerpolicy="no-referrer"
     ></script>
-    <script>
-      const key = location.search.replace("?key=", "");
-      const kvKey = encodeKvKey(key.split(","));
-      const editor = ace.edit("result");
+    <script type="module">
+      import {
+        decodeKvKey,
+        encodeKvKey,
+        kvKeyToUrlParam,
+        urlParamToKvKey,
+      } from "/key-encoding.js";
+      import {
+        apiRequest,
+        checkCredentials,
+        getHeaders,
+        requireCredentials,
+      } from "/credentials.js";
 
-      editor.session.setMode("ace/mode/json");
-      editor.setShowPrintMargin(false);
+      if (requireCredentials(document.body)) {
+        const params = new URLSearchParams(location.search);
+        const key = params.get("key") || "";
+        const kvKey = urlParamToKvKey(key);
+        const editor = ace.edit("result");
 
-      function encodeKvKey(key) {
-        return encodeURIComponent(
-          JSON.stringify(
-            key.map((part) => {
-              if (part instanceof Uint8Array) {
-                return { type: "Uint8Array", value: Array.from(part) };
+        editor.session.setMode("ace/mode/json");
+        editor.setShowPrintMargin(false);
+
+        apiRequest("/get?key=" + kvKeyToUrlParam(kvKey))
+          .then((res) => res.json())
+          .then((entry) => {
+            const value = entry.value;
+            const formatted = JSON.stringify(value, null, 2);
+            editor.setValue(formatted);
+            editor.clearSelection();
+          });
+
+        function save() {
+          const saveButton = document.querySelector("#save-button");
+          saveButton.textContent = "Saving...";
+          const data = JSON.parse(editor.getValue());
+
+          apiRequest("/set?key=" + kvKeyToUrlParam(kvKey), {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(data),
+          }).then(() => {
+            saveButton.textContent = "Save";
+          }).catch(() => {
+            alert("Failed to save data");
+            saveButton.textContent = "Save";
+          });
+        }
+
+        function deleteEntry() {
+          if (
+            confirm(
+              "Are you sure you want to delete this entry? This action cannot be undone.",
+            )
+          ) {
+            const deleteButton = document.querySelector(
+              "#delete-button",
+            );
+            deleteButton.textContent = "Deleting...";
+            deleteButton.disabled = true;
+
+            apiRequest("/delete?key=" + kvKeyToUrlParam(kvKey), {
+              method: "DELETE",
+            }).then((response) => {
+              if (response.ok) {
+                alert("Entry deleted successfully");
+                window.location.href = "/";
+              } else {
+                throw new Error("Delete failed");
               }
-              return { type: typeof part, value: part };
-            }),
-          ),
+            }).catch(() => {
+              alert("Failed to delete entry");
+              deleteButton.textContent = "Delete";
+              deleteButton.disabled = false;
+            });
+          }
+        }
+
+        document.getElementById("save-button").addEventListener(
+          "click",
+          save,
         );
-      }
-
-      fetch("/get?key=" + kvKey)
-        .then((res) => res.json())
-        .then((entry) => {
-          const value = JSON.parse(entry.value);
-          const formatted = JSON.stringify(value, null, 2);
-          editor.setValue(formatted);
-          editor.clearSelection();
-        });
-
-      function save() {
-        const saveButton = document.querySelector("#save-button");
-        saveButton.textContent = "Saving...";
-        const data = editor.getValue();
-        fetch("/set?key=" + kvKey, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(data),
-        }).then(() => {
-          saveButton.textContent = "Save";
-        }).catch(() => {
-          alert("Failed to save data");
-          saveButton.textContent = "Save";
-        });
+        document.getElementById("delete-button").addEventListener(
+          "click",
+          deleteEntry,
+        );
       }
     </script>
   </body>

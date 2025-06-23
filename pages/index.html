@@ -4,46 +4,14 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Deno KV Explorer</title>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-      }
-      form {
-        display: flex;
-        flex-direction: column;
-        margin-bottom: 16px;
-      }
-      input:not([type="checkbox"]) {
-        flex: 1;
-        padding: 8px;
-        font-size: 16px;
-        margin-bottom: 16px;
-        width: 100%;
-        box-sizing: border-box;
-      }
-      button {
-        padding: 8px;
-        font-size: 16px;
-        cursor: pointer;
-        margin: 8px 0;
-      }
-      .entry {
-        color: #333;
-        display: grid;
-        grid-template-rows: 1fr;
-        grid-column-gap: 8px;
-        text-decoration: none;
-        padding: 8px;
-        border-bottom: 1px solid #f0f0f0;
-      }
-      .entry:hover {
-        background-color: #f9f9f9;
-      }
-    </style>
+    <link rel="stylesheet" href="/styles.css">
   </head>
-  <body>
+  <body class="container">
     <h1>Deno KV Explorer</h1>
-    <form onsubmit="event.preventDefault(); find(); return false;">
+    <nav>
+      <a href="/settings">⚙️ Settings</a>
+    </nav>
+    <form id="search-form" class="search-form">
       <div>
         <label for="search">Prefix</label>
         <input
@@ -53,117 +21,247 @@
           value="[]"
         />
       </div>
-      <div>
-        <label for="limit">Limit</label>
-        <input
-          type="number"
-          id="limit"
-          placeholder="Limit"
-          max="1000"
-          min="1"
-        />
+      <div class="search-controls">
+        <div class="limit-group">
+          <label for="limit">Limit</label>
+          <input
+            type="number"
+            id="limit"
+            placeholder="Limit"
+            max="1000"
+            min="1"
+          />
+        </div>
+        <div class="reverse-group">
+          <input type="checkbox" id="reverse" />
+          <label for="reverse">Reverse</label>
+        </div>
+        <div class="spacer"></div>
+        <button type="submit" class="btn-primary">Search</button>
       </div>
-      <div>
-        <label for="reverse">Reverse</label>
-        <input type="checkbox" id="reverse" />
-      </div>
-      <button type="submit">Search</button>
     </form>
     <div id="results"></div>
-    <script>
+    <button id="load-more" class="btn-secondary" style="display: none">
+      Load More
+    </button>
+    <script type="module">
+      import {
+        decodeKvKey,
+        encodeKvKey,
+        kvKeyToUrlParam,
+        urlParamToKvKey,
+      } from "/key-encoding.js";
+      import {
+        apiRequest,
+        checkCredentials,
+        getHeaders,
+        requireCredentials,
+      } from "/credentials.js";
+
       const params = new URLSearchParams(window.location.search);
-      const prefix = decodeKvKey(params.get("prefix") || "[]");
+      const prefix = urlParamToKvKey(params.get("prefix") || "");
       const limit = params.get("limit") || 100;
       const reverse = params.get("reverse") === "true";
 
       const searchEl = document.getElementById("search");
       const limitEl = document.getElementById("limit");
       const reverseEl = document.getElementById("reverse");
+      const resultsEl = document.getElementById("results");
+      const loadMoreBtn = document.getElementById("load-more");
 
       searchEl.value = JSON.stringify(prefix);
       limitEl.value = limit;
       reverseEl.checked = reverse;
 
-      fetch(
-        "/list?prefix=" + encodeKvKey(prefix) + "&limit=" + limit + "&reverse=" +
-          reverse,
-      )
-        .then((res) => res.json())
-        .then((data) => {
-          const maxKeyLength = data.reduce(
-            (max, entry) => Math.max(max, entry.key.length),
-            0,
-          );
-          data.forEach((entry) => {
-            const entryEl = document.createElement("a");
-            entryEl.style.gridTemplateColumns = `repeat(${maxKeyLength}, 1fr)`;
-            entryEl.classList.add("entry");
-            entryEl.href = `/edit?key=${entry.key}`;
-            entry.key.forEach((keyPart) => {
-              const keyPartEl = document.createElement("span");
-              keyPartEl.classList.add("key-part");
-              keyPartEl.textContent = keyPart;
-              entryEl.appendChild(keyPartEl);
-            });
-            results.appendChild(entryEl);
+      let currentCursor = null;
+
+      function createKeyPart(keyPart) {
+        const keyPartEl = document.createElement("span");
+        keyPartEl.className = "key-part";
+        keyPartEl.textContent = keyPart;
+        keyPartEl.title = "Click to copy";
+        
+        // Add tooltip
+        const tooltip = document.createElement("span");
+        tooltip.className = "copy-tooltip";
+        tooltip.textContent = "Click to copy";
+        keyPartEl.appendChild(tooltip);
+        
+        // Add copy functionality
+        keyPartEl.onclick = async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          await navigator.clipboard.writeText(keyPart);
+          showCopyFeedback(keyPartEl, tooltip);
+        };
+        
+        return keyPartEl;
+      }
+
+      function showCopyFeedback(keyPartEl, tooltip) {
+        keyPartEl.classList.add("copied");
+        tooltip.textContent = "Copied!";
+        tooltip.classList.add("show");
+        
+        setTimeout(() => {
+          keyPartEl.classList.remove("copied");
+          tooltip.textContent = "Click to copy";
+          tooltip.classList.remove("show");
+        }, 2000);
+      }
+
+      function setButtonLoading(button, loadingText) {
+        button.textContent = loadingText;
+        button.disabled = true;
+      }
+
+      async function deleteEntry(key, entryElement) {
+        if (!confirm("Are you sure you want to delete this entry? This action cannot be undone.")) {
+          return;
+        }
+
+        const deleteBtn = entryElement.querySelector(".delete-btn");
+        const originalText = deleteBtn.textContent;
+        setButtonLoading(deleteBtn, "Deleting...");
+
+        try {
+          const response = await apiRequest("/delete?key=" + kvKeyToUrlParam(key), {
+            method: "DELETE"
           });
-        });
 
-      function find() {
-        const search = JSON.parse(document.getElementById("search").value);
-        const prefix = encodeKvKey(search);
-        const limit = document.getElementById("limit").value;
-        const reverse = document.getElementById("reverse").checked;
-        window.location.href =
-          `/?prefix=${prefix}&limit=${limit}&reverse=${reverse}`;
-      }
-
-      function encodeKvKey(key) {
-        return encodeURIComponent(
-          JSON.stringify(
-            key.map((part) => {
-              if (part instanceof Uint8Array) {
-                return { type: "Uint8Array", value: Array.from(part) };
-              }
-              return { type: typeof part, value: part };
-            }),
-          ),
-        );
-      }
-
-      function decodeKvKey(encodedKey) {
-        const decoded = JSON.parse(decodeURIComponent(encodedKey));
-        return decoded.map((item) => {
-          switch (item.type) {
-            case "Uint8Array":
-              return new Uint8Array(item.value);
-            case "string":
-              return item.value;
-            case "number":
-              return item.value;
-            case "bigint":
-              return BigInt(item.value);
-            case "boolean":
-              return item.value;
-            default:
-              throw new Error(`Unsupported key part type: ${item.type}`);
+          if (response.ok) {
+            entryElement.remove();
+          } else {
+            throw new Error("Delete failed");
           }
-        });
-      }
-
-      function deleteEntries(path) {
-        const confirm = prompt("Are you sure you want to delete this entry?");
-        if (confirm === "yes") {
-          fetch("/delete/" + path, {
-            method: "DELETE",
-          })
-            .then((res) => res.json())
-            .then((data) => {
-              if (data.success) window.location.reload();
-              else alert("Failed to delete entry");
-            });
+        } catch (error) {
+          alert("Failed to delete entry");
+          deleteBtn.textContent = originalText;
+          deleteBtn.disabled = false;
         }
       }
+
+      function loadResults(cursor = null, append = false) {
+        if (!requireCredentials(resultsEl)) return;
+
+        // Show loading state
+        if (!append) {
+          resultsEl.innerHTML = '<div class="loading-text">Loading results...</div>';
+        }
+
+        const url = "/list?prefix=" + kvKeyToUrlParam(prefix) +
+          "&limit=" + limit +
+          "&reverse=" + reverse +
+          (cursor ? "&cursor=" + encodeURIComponent(cursor) : "");
+
+        apiRequest(url)
+          .then((res) => res.json())
+          .then((response) => {
+            const data = response.entries || response; // Handle both old and new format
+            currentCursor = response.cursor;
+
+            if (!append) {
+              resultsEl.innerHTML = "";
+            }
+
+            const maxKeyLength = data.reduce(
+              (max, entry) => Math.max(max, entry.key.length),
+              0,
+            );
+
+            data.forEach(entry => {
+              const entryEl = document.createElement("div");
+              entryEl.className = "entry";
+              
+              // Create keys container
+              const keysContainer = document.createElement("div");
+              keysContainer.className = "entry-keys";
+              
+              // Create key parts
+              entry.key.forEach(keyPart => {
+                const keyPartEl = createKeyPart(keyPart);
+                keysContainer.appendChild(keyPartEl);
+              });
+              
+              // Create actions container
+              const actionsContainer = document.createElement("div");
+              actionsContainer.className = "entry-actions";
+              
+              const editBtn = document.createElement("a");
+              editBtn.className = "edit-btn";
+              editBtn.textContent = "Edit";
+              editBtn.href = "/edit?key=" + kvKeyToUrlParam(entry.key);
+              
+              const deleteBtn = document.createElement("button");
+              deleteBtn.className = "delete-btn";
+              deleteBtn.textContent = "Delete";
+              deleteBtn.onclick = () => deleteEntry(entry.key, entryEl);
+              
+              actionsContainer.appendChild(deleteBtn);
+              actionsContainer.appendChild(editBtn);
+              
+              // Assemble entry
+              entryEl.appendChild(keysContainer);
+              entryEl.appendChild(actionsContainer);
+              resultsEl.appendChild(entryEl);
+            });
+
+            // Show/hide load more button based on whether there's a cursor
+            if (currentCursor && data.length === parseInt(limit)) {
+              loadMoreBtn.style.display = "block";
+            } else {
+              loadMoreBtn.style.display = "none";
+            }
+          });
+      }
+
+      // Load initial results
+      loadResults();
+
+      // Load more button handler
+      loadMoreBtn.onclick = () => {
+        const originalText = loadMoreBtn.textContent;
+        setButtonLoading(loadMoreBtn, 'Loading More...');
+        
+        loadResults(currentCursor, true);
+        
+        setTimeout(() => {
+          loadMoreBtn.textContent = originalText;
+          loadMoreBtn.disabled = false;
+        }, 1000);
+      };
+
+      const find = () => {
+        const search = JSON.parse(searchEl.value);
+        const prefix = kvKeyToUrlParam(search);
+        const params = new URLSearchParams({
+          prefix,
+          limit: limitEl.value,
+          reverse: reverseEl.checked
+        });
+        location.href = `/?${params}`;
+      };
+
+      document.getElementById("search-form").onsubmit = (event) => {
+        event.preventDefault();
+        
+        if (searchEl.value === "") {
+          searchEl.value = "[]";
+        }
+        
+        const searchBtn = event.target.querySelector('button[type="submit"]');
+        const originalText = searchBtn.textContent;
+        setButtonLoading(searchBtn, 'Searching...');
+        
+        find();
+        
+        setTimeout(() => {
+          searchBtn.textContent = originalText;
+          searchBtn.disabled = false;
+        }, 1000);
+      };
+
     </script>
   </body>
 </html>

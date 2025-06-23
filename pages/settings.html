@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings - Deno KV Explorer</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body class="container">
+    <h1>Settings</h1>
+
+    <div class="status info mb-20">
+      <strong>Note:</strong> These credentials are stored in your localStorage.
+      I recommend you clear these settings after you're done just incase the
+      domain you're viewing this on is used by other apps.
+    </div>
+
+    <form id="settings-form">
+      <div class="form-group">
+        <label for="db-id">Deno KV Database ID:</label>
+        <input type="text" id="db-id" placeholder="Your database ID">
+      </div>
+
+      <div class="form-group">
+        <label for="access-token">Access Token:</label>
+        <input
+          type="password"
+          id="access-token"
+          placeholder="Your access token"
+        >
+      </div>
+
+      <button type="submit" class="btn-primary">Save Settings</button>
+      <button type="button" class="btn-danger" id="clear-btn">
+        Clear Settings
+      </button>
+      <button
+        type="button"
+        class="btn-secondary"
+        onclick="window.location.href='/'"
+      >
+        Back to Explorer
+      </button>
+    </form>
+
+    <div id="status" class="status" style="display: none"></div>
+
+    <script type="module">
+      const dbIdInput = document.getElementById("db-id");
+      const accessTokenInput = document.getElementById("access-token");
+      const statusDiv = document.getElementById("status");
+      const settingsForm = document.getElementById("settings-form");
+      const clearBtn = document.getElementById("clear-btn");
+
+      // Load existing settings on page load
+      function loadSettings() {
+        const dbId = localStorage.getItem("DENO_KV_DB_ID");
+        const accessToken = localStorage.getItem(
+          "DENO_KV_ACCESS_TOKEN",
+        );
+
+        if (dbId) dbIdInput.value = dbId;
+        if (accessToken) accessTokenInput.value = accessToken;
+      }
+
+      // Show status message
+      function showStatus(message, type) {
+        statusDiv.textContent = message;
+        statusDiv.className = `status ${type}`;
+        statusDiv.style.display = "block";
+        setTimeout(() => {
+          statusDiv.style.display = "none";
+        }, 3000);
+      }
+
+      // Test connection with provided credentials
+      async function testConnection(dbId, accessToken) {
+        try {
+          const response = await fetch("/test-connection", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-KV-DB-ID": dbId,
+              "X-KV-ACCESS-TOKEN": accessToken,
+            },
+          });
+
+          return response.ok;
+        } catch (error) {
+          return false;
+        }
+      }
+
+      // Save settings
+      settingsForm.addEventListener("submit", async function (event) {
+        event.preventDefault();
+
+        const dbId = dbIdInput.value.trim();
+        const accessToken = accessTokenInput.value.trim();
+
+        if (!dbId || !accessToken) {
+          showStatus("Please fill in both fields", "error");
+          return;
+        }
+
+        // Test connection before saving
+        showStatus("Testing connection...", "info");
+        const connectionWorks = await testConnection(dbId, accessToken);
+
+        if (connectionWorks) {
+          localStorage.setItem("DENO_KV_DB_ID", dbId);
+          localStorage.setItem("DENO_KV_ACCESS_TOKEN", accessToken);
+          showStatus("Settings saved successfully!", "success");
+        } else {
+          showStatus(
+            "Connection test failed. Please check your credentials.",
+            "error",
+          );
+        }
+      });
+
+      // Clear settings
+      clearBtn.addEventListener("click", function () {
+        if (confirm("Are you sure you want to clear all settings?")) {
+          localStorage.removeItem("DENO_KV_DB_ID");
+          localStorage.removeItem("DENO_KV_ACCESS_TOKEN");
+          dbIdInput.value = "";
+          accessTokenInput.value = "";
+          showStatus("Settings cleared", "success");
+        }
+      });
+
+      // Load settings on page load
+      loadSettings();
+    </script>
+  </body>
+</html>
