@@ -10,7 +10,6 @@ A minimalist app for browsing your Deno KV data.
 *Server is less than 200 lines of code and the frontend is just a few html, css and js files - all less than 200 lines.
 
 ## Run online
-Note: This won't work yet as the new Deno Deploy doesn't yet support DenoKV (see [here](https://docs.deno.com/deploy/early-access/))
 * Visit [https://deno-kv-explorer.nathansherburn.deno.net/](https://deno-kv-explorer.nathansherburn.deno.net/)
 * Grab your Deno KV Database ID from `https://dash.deno.com/projects/<your-project-name>`
 * Grab your Access Token from [https://dash.deno.com/account](https://dash.deno.com/account)
